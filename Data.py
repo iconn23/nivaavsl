@@ -1,72 +1,64 @@
 import yfinance as yf
+import pandas_market_calendars as mcal
+from datetime import datetime, timedelta
+import pytz
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
+class SP500Data:
+    def __init__(self, file_path="spx.txt"):
+        self.file_path = file_path
+        self.stock_objects = {}
+        self._import_stocks()
+    def _import_stocks(self):
+        try:
+            with open(self.file_path, 'r') as file:
+                tickers = [line.strip() for line in file]
+                for ticker in tickers:
+                    print(ticker)
+                    self.stock_objects[ticker] = StockData(ticker)
+        except FileNotFoundError:
+            print(f"Error: The file {self.file_path} was not found.")
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
-
-class StockMinutePrices:
+class StockData:
     def __init__(self, ticker):
         self.ticker = ticker
         self.percents = None
         self.minutes = None
-        self.colors = None
+        self.market_cap = None
+        self._load_data()
 
-    def get_minutes(self):
-        stock = yf.Ticker(self.ticker)
-        data = stock.history(start="2024-07-17", end="2024-07-18", interval='1m')
-        closing_price = stock.history(start="2024-07-16", period="1d")['Close'].iloc[0]
+    def _load_data(self):
+        last_trading_day = self.get_last_trading_day()
+        previous_trading_close = last_trading_day - timedelta(days=1)
 
-        if data is not None:
-            prices = data['Close'].tolist()
-            percents = [(float(price) - closing_price) / closing_price for price in prices]
-            timestamps = data.index.tolist()
-            minutes = [timestamp.strftime('%Y-%m-%d %H:%M:%S') for timestamp in timestamps]
-            self.percents = percents
-            self.minutes = minutes
+        try:
+            stock_object = yf.Ticker(self.ticker)
+            daily_data = stock_object.history(start=last_trading_day.strftime('%Y-%m-%d'), period="1d", interval='1m')
+            previous_close = stock_object.history(start=previous_trading_close.strftime('%Y-%m-%d'), period="1d")['Close'].iloc[0]
+
+            self.market_cap = stock_object.info['marketCap']
+            self.percents = [(price - previous_close) / previous_close for price in daily_data['Close']]
+            self.minutes = [timestamp.strftime('%Y-%m-%d %H:%M:%S') for timestamp in daily_data.index]
+
+        except Exception as e:
+            print(f"An error occurred while loading data for {self.ticker}: {e}")
+
+    @staticmethod
+    def get_last_trading_day():
+        present = datetime.now(pytz.timezone('US/Eastern'))
+        nyse = mcal.get_calendar('NYSE')
+        schedule = nyse.schedule(start_date=present - timedelta(days=10), end_date=present)
+
+        if present.hour > 16:
+            return schedule['market_close'].iloc[-1].date()
         else:
-            return "Data not fetched yet. Use fetch_yesterday_prices() first."
+            return schedule['market_close'].iloc[-2].date()
 
-    def get_colors(self):
-        colors = []
-        for percent in self.percents:
-            percent = float(percent)
-            if percent < 0.50:
-                red = 1.0
-                green = 1.0 - percent * 2
-                blue = 1.0 - percent * 2
-            else:
-                red = 1.0 - (percent - 0.50) * 2
-                green = 1.0
-                blue = 1.0 - (percent - 0.50) * 2
-            colors.append((red, green, blue))
-        return colors
+stock = StockData('AAPL')
 
-stock = StockMinutePrices('AAPL')
-stock.get_minutes()
+#data = SP500Data()
 
-def value_to_color(value, min_val, max_val):
-    normalized_value = (value - min_val) / (max_val - min_val)  # Normalize to range [0, 1]
-    if value >= 0:
-        return (0, 1 - normalized_value, 0)  # Green shades
-    else:
-        return (1 - normalized_value, 0, 0)  # Red shades
 
-values = stock.percents
-print(values)
-min_val, max_val = min(values), max(values)
-
-fig, ax = plt.subplots()
-width, height = 0.2, 0.2
-x_start, y_start = 0.1, 0.5
-
-for i, value in enumerate(values):
-    color = value_to_color(value, min_val, max_val)
-    rect = patches.Rectangle((x_start + i * width, y_start), width, height, linewidth=1, edgecolor=color, facecolor=color)
-    ax.add_patch(rect)
-
-ax.set_xlim(0, 1)
-ax.set_ylim(0, 1)
-ax.set_aspect('equal')
-ax.axis('off')
-
-plt.show()
