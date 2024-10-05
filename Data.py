@@ -3,6 +3,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
 import pandas_market_calendars as mcal
+import os
 
 class SP500Data:
     def __init__(self):
@@ -30,8 +31,11 @@ class SP500Data:
 
         data = {ticker: stock.to_dict() for ticker, stock in self.stock_objects.items()}
         data_filename = StockData.get_last_trading_day().strftime('%Y-%m-%d') + ".json"
+        directory = "DailyData"
+        os.makedirs(directory, exist_ok=True)
+        data_filepath = os.path.join(directory, data_filename)
         try:
-            with open(data_filename, 'w') as file:
+            with open(data_filepath, 'w') as file:
                 json.dump(data, file)
             print(f"Data saved to {data_filename}")
         except Exception as e:
@@ -51,6 +55,7 @@ class StockData:
         self.minutes = None
         self.market_cap = None
         self.date = self.get_last_trading_day()
+        self.last_close = self.get_last_trading_day(previous_day = True)
         self._load_data()
 
     def to_dict(self):
@@ -61,13 +66,10 @@ class StockData:
         }
 
     def _load_data(self):
-        previous_trading_close = self.date - timedelta(days=1)
-
         try:
             stock_object = yf.Ticker(self.ticker)
             daily_data = stock_object.history(start=self.date.strftime('%Y-%m-%d'), period="1d", interval='1m')
-            previous_close = stock_object.history(start=previous_trading_close.strftime('%Y-%m-%d'), period="1d")['Close'].iloc[0]
-
+            previous_close = stock_object.history(start=self.last_close.strftime('%Y-%m-%d'), period="1d")['Close'].iloc[0]
             self.market_cap = stock_object.info['marketCap']
             self.percents = [(price - previous_close) / previous_close for price in daily_data['Close']]
             self.minutes = [timestamp.strftime('%H:%M') for timestamp in daily_data.index]
@@ -120,12 +122,18 @@ class StockData:
         self.percents = interpolated_percents
 
     @staticmethod
-    def get_last_trading_day():
+    def get_last_trading_day(previous_day=False):
         present = datetime.now(pytz.timezone('US/Eastern'))
         nyse = mcal.get_calendar('NYSE')
         schedule = nyse.schedule(start_date=present - timedelta(days=10), end_date=present)
 
-        if present.hour > 16:
-            return schedule['market_close'].iloc[-1].date()
+        last_market_close = schedule['market_close'].iloc[-1]
+        is_after_close = present.date() > last_market_close.date() or (
+                present.date() == last_market_close.date() and present.hour >= 16)
+
+        if previous_day is False:
+            return schedule['market_close'].iloc[-1].date() if is_after_close else schedule['market_close'].iloc[
+                -2].date()
         else:
-            return schedule['market_close'].iloc[-2].date()
+            return schedule['market_close'].iloc[-2].date() if is_after_close else schedule['market_close'].iloc[
+                -3].date()
