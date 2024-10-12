@@ -5,6 +5,7 @@ import time
 import pygame
 import json
 import DrawObject
+from DrawObject import TextObject
 
 
 class Canvas:
@@ -87,14 +88,27 @@ class Canvas:
     def draw_scene_2(self):
         stock_block = self.draw_objects["Main Stock Block"]
         timeline = self.draw_objects['Timeline']
-        timeline.fade_out()
+        DrawObject.fade_out(self, color=timeline.color, parts_dict=timeline.timeline_parts, exclude_keys=["Clock Time"])
 
         stock_block.draw_lines(speed=7)
-        time.sleep(1.5)
-        stock_block.split_block(num_blocks=4, separation=40)
-        for subblock in stock_block.subblocks:
-            subblock.draw_border(1, (255,255,255))
+
+        time.sleep(0.6)
+        font = pygame.font.SysFont('Verdana', 15)
+        clock_pos = self.draw_objects["Timeline"].clock.pos
+        center_pos = (clock_pos[0], clock_pos[1] - 25)
+        DrawObject.TextObject(self, center_pos=center_pos, color=(255, 255, 255), font=font, text="PERFORMANCE AT")
+        time.sleep(0.6)
+
+        stock_block.split_block(num_blocks=4, separation=50)
+        subblock_labels = ['Large Market Cap', 'Mid-Large Market Cap', 'Mid-Small Market Cap', 'Small Market Cap']
+        for i in range(len(stock_block.subblocks)):
+            subblock = stock_block.subblocks[i]
+            font = pygame.font.SysFont('Arialrounded', 16)
+            label_center = (self.width/2, subblock.pos[1]-15)
+            TextObject(self, label_center, (255, 255, 255), font,subblock_labels[i])
+            subblock.draw_border(2, (255, 255, 255))
             time.sleep(.4)
+
         stock_block.draw_subblocks(speed=3)
 
         self.scene = 3

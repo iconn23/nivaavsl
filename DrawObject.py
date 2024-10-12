@@ -69,7 +69,6 @@ class ObjectBorder(DrawObject):
         pygame.draw.line(self.screen, (0, 0, 0), top_left, top_right, 1)
         pygame.draw.line(self.screen, (0, 0, 0), bottom_left, bottom_right, 1)
 
-
 class StockSquare(DrawObject):
     def __init__(self, view, pos, size, percent):
         super().__init__(view, pos, get_color(percent))
@@ -112,6 +111,9 @@ class StockBlock(DrawObject):
         self.lines = lines if lines is not None else {'stock_lines':{},'block_lines':{}}
         self.subblocks = []
 
+        if lines is not None:
+            self.pos = list(lines['block_lines'].values())[0]['start_pos']
+
     def add_line(self, stock_line):
         self.lines["stock_lines"][stock_line.stock] = stock_line
 
@@ -150,7 +152,16 @@ class StockBlock(DrawObject):
                         pygame.draw.line(self.screen, color, block_line["start_pos"], end_pos, 1)
                 block_num += 1
             pygame.display.flip()
-            time.sleep(.02)
+            time.sleep(.01)
+
+        for subblock in self.subblocks:
+            average_value = subblock.average_block() * 100
+            average_text = "{:+.2f}%".format(average_value)
+            font = pygame.font.SysFont('Verdana', 40)
+            label_pos = subblock.get_center()
+            TextObject(self, label_pos, (255, 255, 255), font, average_text)
+
+
 
     def draw_border(self, thickness, color):
         block_lines = list(self.lines['block_lines'].values())
@@ -213,6 +224,13 @@ class StockBlock(DrawObject):
         stock_lines = list(self.lines['stock_lines'].values())
         return sum(stock_line.percents[-1] for stock_line in stock_lines) / len(stock_lines)
 
+    def get_center(self):
+        top_left = list(self.lines['block_lines'].values())[0]['start_pos']
+        bottom_right = list(self.lines['block_lines'].values())[-1]['end_pos']
+        center_x = ((bottom_right[0] - top_left[0]) // 2) + top_left[0]
+        center_y = ((bottom_right[1] - top_left[1]) // 2) + top_left[1]
+        center_pos = (center_x, center_y)
+        return center_pos
 
     def __str__(self):
         return f"Block(numstocks={len(self)})"
@@ -226,6 +244,7 @@ class Timeline(DrawObject):
         self.current_pos = start_pos
         self.color = color
         self.view = view
+        self.clock = None
         self.timeline_parts = {}
         self.draw(0)
 
@@ -246,7 +265,7 @@ class Timeline(DrawObject):
     def draw_main_line(self, thickness):
         pygame.draw.line(self.screen, self.color, self.pos, self.current_pos, thickness)
         self.timeline_parts["Main Line"] = {
-            "line": True,
+            "type": "line",
             "start_pos": self.pos,
             "end_pos": self.current_pos,
             "thickness": thickness
@@ -258,7 +277,7 @@ class Timeline(DrawObject):
         pygame.draw.line(self.screen, self.color, pos1, pos2, thickness)
 
         self.timeline_parts["Tickmark " + str(self.current_pos[0])] = {
-            "line": True,
+            "type": "line",
             "start_pos": pos1,
             "end_pos": pos2,
             "thickness": thickness
@@ -266,54 +285,54 @@ class Timeline(DrawObject):
 
     def draw_time(self, draw_time, tickmark_time=False):
         display_time = "MARKET CLOSE" if draw_time == "04:00 PM" else draw_time.lstrip('0')
-
-        # clear previous time and draw new
         clock_font = pygame.font.SysFont('Verdana', 24)
-        text_width, text_height = clock_font.size("MARKET CLOSE")
-        time_rect = pygame.Rect(
-            (self.view.width / 2 - text_width / 2, 100 - text_height / 2),
-            (text_width, text_height)
-        )
-        self.screen.fill((0, 0, 0), time_rect)
-        time_text = clock_font.render(display_time, True, (255, 255, 255))
-        self.screen.blit(time_text, time_text.get_rect(center=time_rect.center))
+        center_pos = (self.view.width / 2, 100)
+
+        if display_time == "9:30 AM":
+            self.clock = TextObject(view=self.view, center_pos=center_pos, color=self.color, font=clock_font, text=display_time)
+        else:
+            self.clock.update(new_text=display_time)
+
+        self.timeline_parts["Clock Time"] = self.clock.to_dict()
 
         if tickmark_time:
             hour = draw_time.split(':')[0].lstrip('0')
             meridiem = draw_time[-2:]
-            tickmark_time_str = f"{hour}{meridiem}"
-
-            # render and position tickmark time
+            tickmark_str = f"{hour}{meridiem}"
             tickmark_font = pygame.font.SysFont('Verdana', 10)
-            tickmark_text = tickmark_font.render(tickmark_time_str, True, self.color)
-            tickmark_rect = tickmark_text.get_rect(center=(self.current_pos[0], self.current_pos[1] - 30))
-            self.screen.blit(tickmark_text, tickmark_rect)
+            center_pos = (self.current_pos[0], self.current_pos[1] - 30)
+            tickmark_label = TextObject(view=self.view, center_pos=center_pos, color=self.color, font=tickmark_font, text=tickmark_str)
+            self.timeline_parts["Time Label " + tickmark_str] = tickmark_label.to_dict()
 
-            self.timeline_parts["Time Label " + tickmark_time_str] = {
-                "line": False,
-                "font": tickmark_font,
-                "string": tickmark_time_str,
-                "rect": tickmark_rect
-            }
+class TextObject(DrawObject):
+    def __init__(self, view, center_pos, color, font, text):
+        super().__init__(view, center_pos, color)
+        self.font = font
+        self.text = text
+        self.rect = None
+        self.draw()
 
-    def fade_out(self):
-        while self.color != (0,0,0):
-            color_list = list(self.color)
-            self.color = tuple([max(0, x - 3) for x in color_list])
-            for timeline_part in self.timeline_parts.values():
-                if timeline_part['line']:
-                    pygame.draw.line(self.screen, self.color,
-                                     timeline_part['start_pos'],
-                                     timeline_part['end_pos'],
-                                     timeline_part['thickness'])
+    def draw(self):
+        draw_text = self.font.render(self.text, True, self.color)
+        self.rect = draw_text.get_rect(center=self.pos)
+        self.screen.blit(draw_text, self.rect)
 
-                else:
-                    tickmark_rect = timeline_part['rect']
-                    self.screen.fill((0, 0, 0), tickmark_rect)
-                    tickmark_font = timeline_part['font']
-                    tickmark_text = tickmark_font.render(timeline_part['string'], True, self.color)
-                    self.screen.blit(tickmark_text, tickmark_rect)
-                pygame.display.flip()
+    def update(self, new_text=None, new_pos=None):
+        self.screen.fill((0, 0, 0), self.rect)
+        if new_text is not None:
+            self.text = new_text
+        if new_pos is not None:
+            self.pos = new_pos
+        self.draw()
+
+
+    def to_dict(self):
+        return  {
+            "type": "text",
+            "font": self.font,
+            "string": self.text,
+            "rect": self.rect
+        }
 
 def get_color(percent):
     norm = abs(percent) / 0.05 if abs(percent) < 0.05 else 1
@@ -348,3 +367,26 @@ def calculate_steps(distances, step_size=1):
         result[distance] = list(reversed(step_array))
 
     return result
+
+def fade_out(view, color, parts_dict, exclude_keys=None):
+    exclude_keys = [] if exclude_keys is None else exclude_keys
+    while color != (0, 0, 0):
+        color_list = list(color)
+        color = tuple([max(0, x - 3) for x in color_list])
+
+        for key, part in parts_dict.items():
+            if key in exclude_keys:
+                continue
+
+            if part['type'] == 'line':
+                pygame.draw.line(view.screen, color,
+                                 part['start_pos'],
+                                 part['end_pos'],
+                                 part['thickness'])
+            elif part['type'] == 'text':
+                tickmark_rect = part['rect']
+                view.screen.fill((0, 0, 0), tickmark_rect)
+                tickmark_font = part['font']
+                tickmark_text = tickmark_font.render(part['string'], True, color)
+                view.screen.blit(tickmark_text, tickmark_rect)
+            pygame.display.flip()
